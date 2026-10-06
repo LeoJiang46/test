@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>面试题库｜自定义分类+搜索+编辑删除+全部展开收起+权重置顶+测验</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui,sans-serif}
+body{max-width:900px;margin:0 auto;background:#f7f8fa;color:#222}
+h1{font-size:22px;margin-bottom:20px;text-align:center}
+.box{background:#fff;border-radius:8px;padding:8px;margin-bottom:8px;border:1px solid #e5e7eb}
+h2{font-size:16px;margin-bottom:12px}
+button{padding:8px 14px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:8px}
+button.secondary{background:#6b7280}
+button.danger{background:#dc2626}
+button.priority{background:#059669}
+button.warning{background:#f59e0b}
+button.quiz{background:#7c3aed}
+
+/* 搜索框 */
+.search-input{width:100%;border:1px solid #ccc;padding:8px;border-radius:6px;margin-bottom:12px;font-size:14px}
+
+/* 分类标签 */
+.tag-wrap{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.tag{padding:6px 12px;border-radius:999px;cursor:pointer;border:none;color:#fff}
+.tag.active{outline:3px solid #222;outline-offset:1px}
+
+.question-item{border:1px solid #ddd;border-radius:6px;padding:12px 8px;margin:10px 0}
+.q-header{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.q-title{font-weight:bold;cursor:pointer;flex:1}
+.q-actions{display:flex;gap:6px}
+.q-actions button{padding:4px 8px;font-size:12px}
+.a-content{margin-top:10px;padding:10px;background:#f3f4f6;border-radius:6px;white-space:pre-wrap;display:none}
+.a-content.show{display:block}
+
+/* 弹窗样式 */
+.modal-mask{
+  position:fixed;inset:0;background:rgba(0,0,0,0.5);
+  display:none;align-items:center;justify-content:center;z-index:999
+}
+.modal-mask.show{display:flex}
+.modal{
+  background:#fff;padding:20px;border-radius:8px;width:90%;max-width:600px;
+}
+.modal h3{margin-bottom:14px}
+.modal input,.modal textarea,.modal select{
+  width:100%;border:1px solid #ccc;padding:8px;border-radius:6px;
+  margin-bottom:10px;font-size:14px
+}
+.modal textarea{min-height:120px;resize:vertical}
+.modal-buttons{text-align:right;margin-top:10px}
+.custom-cate-input{display:none}
+.custom-cate-input.show{display:block}
+
+/* 测验弹窗独立样式 */
+#quizModal .modal{max-width:700px}
+.quiz-question{font-size:18px;font-weight:bold;margin-bottom:12px}
+.quiz-answer-area{min-height:140px}
+.quiz-reveal-answer{background:#ecfdf5;padding:12px;border-radius:6px;white-space:pre-wrap;margin:12px 0;color:#065f46}
+.quiz-progress{color:#666;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="box">
+  <button onclick="openModal()">新增题目</button>
+  <button class="quiz" onclick="openQuiz()">开始测验</button>
+  <button class="warning" onclick="resetAllWeight()">全部权重置0</button>
+  <br /><br />
+  <button class="secondary" onclick="expandAll()">全部展开</button>
+  <button class="secondary" onclick="collapseAll()">全部收缩</button>
+</div>
+
+<div class="box">
+  <input class="search-input" id="searchInput" placeholder="关键词搜索问题/答案..." oninput="render()">
+  <div class="tag-wrap" id="tagWrap"></div>
+  <div id="listWrap"></div>
+</div>
+
+<!-- 编辑新增弹窗 -->
+<div class="modal-mask" id="modalMask">
+  <div class="modal">
+    <h3 id="modalTitle">添加新面试题</h3>
+    <select id="cateSelect" onchange="onCateChange()">
+      <option value="js">JS</option>
+      <option value="react">React</option>
+      <option value="css">CSS</option>
+      <option value="_custom">自定义分类</option>
+    </select>
+    <input id="customCateInput" class="custom-cate-input" placeholder="输入自定义分类名称">
+    <input id="qInput" placeholder="输入面试问题">
+    <textarea id="aInput" placeholder="输入参考答案"></textarea>
+    <div class="modal-buttons">
+      <button class="secondary" onclick="closeModal()">取消</button>
+      <button onclick="submitQuestion()">确认保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 测验弹窗 -->
+<div class="modal-mask" id="quizModal">
+  <div class="modal">
+    <div class="quiz-progress" id="quizProgress"></div>
+    <div class="quiz-question" id="quizQuestion"></div>
+    <textarea class="quiz-answer-area" id="quizUserAnswer" placeholder="在这里写下你的回答..."></textarea>
+    <div class="quiz-reveal-answer" id="quizRevealAnswer" style="display:none"></div>
+    <div class="modal-buttons">
+      <button class="secondary" onclick="closeQuiz()">退出测验</button>
+      <button id="quizSubmitBtn" onclick="quizSubmit()">提交作答</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// 题库JSON变量，新增weight字段
+const questions = [
+  {
+    cate: "js",
+    q: "说说JS的原型和原型链",
+    a: "每个对象都有__proto__，指向它的构造函数的prototype。\n原型链：对象查找属性时，先找自身，找不到就顺着__proto__往上找，直到null。",
+    weight: 0
+  },
+  {
+    cate: "js",
+    q: "JS闭包是什么，有什么优缺点",
+    a: "闭包：函数能访问外部函数作用域变量，外部函数执行完毕变量不销毁。\n优点：保存私有变量。缺点：容易内存泄漏。",
+    weight: 0
+  },
+  {
+    cate: "react",
+    q: "React的虚拟DOM是什么",
+    a: "用JS对象描述DOM结构，diff对比前后两棵虚拟树，最小化更新真实DOM，减少DOM操作开销。",
+    weight: 0
+  },
+  {
+    cate: "css",
+    q: "flex 布局的主轴和交叉轴",
+    a: "主轴由flex-direction决定，默认水平；交叉轴垂直于主轴。\njustify-content 控制主轴对齐，align-items控制交叉轴对齐。",
+    weight: 0
+  }
+];
+
+let categoryMap = {
+  js: { label: "JS", color: "#f59e0b" },
+  react: { label: "React", color: "#0ea5e9" },
+  css: { label: "CSS", color: "#10b981" }
+};
+let currentFilter = null;
+let editIndex = null;
+
+// 测验全局状态
+let quizPool = [];
+let quizCurrentIndex = 0;
+let quizAnswered = false;
+
+// 生成随机柔和背景色
+function randomColor(){
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 65%, 45%)`;
+}
+
+// 下拉切换，选择自定义时显示输入框
+function onCateChange(){
+  const sel = document.getElementById('cateSelect').value;
+  const customInputWrap = document.getElementById('customCateInput');
+  if(sel === '_custom'){
+    customInputWrap.classList.add('show');
+  }else{
+    customInputWrap.classList.remove('show');
+  }
+}
+
+// 渲染分类标签
+function renderTags(){
+  const wrap = document.getElementById('tagWrap');
+  wrap.innerHTML = '';
+  const allBtn = document.createElement('button');
+  allBtn.className = `tag ${currentFilter===null?'active':''}`;
+  allBtn.style.background="#444";
+  allBtn.textContent = "全部";
+  allBtn.onclick = ()=>{ currentFilter=null; render(); };
+  wrap.appendChild(allBtn);
+
+  Object.entries(categoryMap).forEach(([key, info])=>{
+    const btn = document.createElement('button');
+    btn.className = `tag ${currentFilter===key?'active':''}`;
+    btn.style.background = info.color;
+    btn.textContent = info.label;
+    btn.onclick = ()=>{ currentFilter=key; render(); };
+    wrap.appendChild(btn);
+  })
+}
+
+// 渲染题目列表（带筛选 + 关键词搜索 + 权重倒序）
+function render(){
+  renderTags();
+  const wrap = document.getElementById('listWrap');
+  wrap.innerHTML = '';
+  const keyword = document.getElementById('searchInput').value.toLowerCase().trim();
+
+  let list = [...questions];
+  // 分类过滤
+  if(currentFilter){
+    list = list.filter(item=>item.cate === currentFilter);
+  }
+  // 关键词搜索：匹配问题 或 答案
+  if(keyword){
+    list = list.filter(item=>
+      item.q.toLowerCase().includes(keyword) || item.a.toLowerCase().includes(keyword)
+    );
+  }
+  // ✅ 权重倒序，权重高放前面
+  list.sort((x,y)=> y.weight - x.weight);
+
+  list.forEach((item)=>{
+    const realIndex = questions.indexOf(item);
+    const div = document.createElement('div');
+    div.className = 'question-item';
+    const cateInfo = categoryMap[item.cate] || {label:"未知",color:"#888"};
+    div.innerHTML = `
+      <div class="q-header">
+        <div style="display:flex;gap:8px;align-items:center;flex:1">
+          <span class="tag" style="font-size:12px;padding:3px 8px;background:${cateInfo.color}">${cateInfo.label}</span>
+          <div class="q-title" onclick="toggleAns('ans-${realIndex}')">${item.q}</div>
+        </div>
+        <div class="q-actions">
+          <button class="priority" onclick="increaseWeight(${realIndex})">${item.weight}+</button>
+          <a onclick="openEditModal(${realIndex})">🔧</a>
+          <a onclick="deleteItem(${realIndex})">❌</a>
+        </div>
+      </div>
+      <div class="a-content" id="ans-${realIndex}">${item.a}</div>
+    `
+    wrap.appendChild(div);
+  })
+}
+
+// 权重+1
+function increaseWeight(index){
+  questions[index].weight += 1;
+  render();
+}
+
+// 全部权重置0（全局所有题目，带确认）
+function resetAllWeight(){
+  if(!confirm("⚠️ 确定把**所有题目的权重全部置0**吗？此操作会清除全部置顶标记！")) return;
+  questions.forEach(q => q.weight = 0);
+  render();
+}
+
+// 展开收起单条答案
+function toggleAns(id){
+  const el = document.getElementById(id);
+  el.classList.toggle('show');
+}
+
+// 全部展开（只对当前筛选后的列表生效）
+function expandAll(){
+  const items = document.querySelectorAll('.a-content');
+  items.forEach(el => el.classList.add('show'));
+}
+
+// 全部收缩（只对当前筛选后的列表生效）
+function collapseAll(){
+  const items = document.querySelectorAll('.a-content');
+  items.forEach(el => el.classList.remove('show'));
+}
+
+// 打开【新增/编辑】弹窗
+function openModal(){
+  editIndex = null;
+  document.getElementById('modalTitle').innerText = "添加新面试题";
+  document.getElementById('modalMask').classList.add('show');
+  document.getElementById('qInput').value = '';
+  document.getElementById('aInput').value = '';
+  document.getElementById('customCateInput').value = '';
+  document.getElementById('cateSelect').value = 'js';
+  onCateChange();
+}
+
+function openEditModal(index){
+  editIndex = index;
+  const item = questions[index];
+  document.getElementById('modalTitle').innerText = "编辑面试题";
+  document.getElementById('modalMask').classList.add('show');
+  document.getElementById('qInput').value = item.q;
+  document.getElementById('aInput').value = item.a;
+
+  // 判断是否是内置分类
+  const builtKeys = Object.keys(categoryMap).filter(k=>['js','react','css'].includes(k));
+  if(builtKeys.includes(item.cate)){
+    document.getElementById('cateSelect').value = item.cate;
+    document.getElementById('customCateInput').value = '';
+  }else{
+    document.getElementById('cateSelect').value = '_custom';
+    document.getElementById('customCateInput').value = categoryMap[item.cate]?.label || item.cate;
+  }
+  onCateChange();
+}
+
+function closeModal(){
+  document.getElementById('modalMask').classList.remove('show');
+}
+
+// 提交保存（新增/编辑复用）
+function submitQuestion(){
+  let cateKey = document.getElementById('cateSelect').value;
+  let cateLabel = "";
+
+  if(cateKey === '_custom'){
+    cateLabel = document.getElementById('customCateInput').value.trim();
+    if(!cateLabel){
+      alert("请输入自定义分类名称！");
+      return;
+    }
+    cateKey = cateLabel;
+    if(!categoryMap[cateKey]){
+      categoryMap[cateKey] = {
+        label: cateLabel,
+        color: randomColor()
+      }
+    }
+  }
+
+  const q = document.getElementById('qInput').value.trim();
+  const a = document.getElementById('aInput').value.trim();
+  if(!q){alert("问题不能为空");return}
+
+  const payload = {cate: cateKey, q, a, weight: 0};
+  if(editIndex !== null){
+    // 编辑模式：保留原有weight，不要覆盖成0
+    payload.weight = questions[editIndex].weight;
+    questions[editIndex] = payload;
+  }else{
+    // 新增题目默认weight=0
+    questions.push(payload);
+  }
+  closeModal();
+  render();
+}
+
+// 删除题目
+function deleteItem(index){
+  if(!confirm("确定删除这条题目吗？")) return;
+  questions.splice(index,1);
+  render();
+}
+
+// ===================== 测验模块【最终修复版】 =====================
+function openQuiz(){
+  // 根据当前选中分类筛选题目
+  let sourcePool = currentFilter ? questions.filter(q=>q.cate === currentFilter) : [...questions];
+  if(sourcePool.length === 0){
+    alert("当前分类下没有题目，无法开始测验！");
+    return;
+  }
+  // 打乱数组，最多取10题
+  shuffleArray(sourcePool);
+  quizPool = sourcePool.slice(0,10);
+  quizCurrentIndex = 0;
+  quizAnswered = false;
+
+  document.getElementById('quizModal').classList.add('show');
+  renderQuizQuestion();
+}
+
+function closeQuiz(){
+  document.getElementById('quizModal').classList.remove('show');
+  quizPool = [];
+  quizCurrentIndex = 0;
+  quizAnswered = false;
+}
+
+function renderQuizQuestion(){
+  const item = quizPool[quizCurrentIndex];
+  document.getElementById('quizProgress').textContent = `题目 ${quizCurrentIndex+1}/${quizPool.length}`;
+  document.getElementById('quizQuestion').textContent = item.q;
+  document.getElementById('quizUserAnswer').value = '';
+  document.getElementById('quizUserAnswer').disabled = false;
+  document.getElementById('quizRevealAnswer').style.display = 'none';
+  const submitBtn = document.getElementById('quizSubmitBtn');
+  submitBtn.disabled = false;
+  submitBtn.textContent = "提交作答";
+  quizAnswered = false;
+}
+
+function quizSubmit(){
+  if(!quizAnswered){
+    // 第一次点击：提交，展示答案
+    const item = quizPool[quizCurrentIndex];
+    document.getElementById('quizRevealAnswer').innerText = "参考答案：\n" + item.a;
+    document.getElementById('quizRevealAnswer').style.display = 'block';
+    document.getElementById('quizUserAnswer').disabled = true;
+    quizAnswered = true;
+
+    quizCurrentIndex += 1;
+    const submitBtn = document.getElementById('quizSubmitBtn');
+    if(quizCurrentIndex >= quizPool.length){
+      submitBtn.textContent = "测验完成，点击关闭";
+    }else{
+      submitBtn.textContent = "下一题";
+    }
+  }else{
+    // 已经答完这一题
+    if(quizCurrentIndex >= quizPool.length){
+      // 全部做完，点击直接关闭弹窗
+      closeQuiz();
+    }else{
+      renderQuizQuestion();
+    }
+  }
+}
+
+// 数组洗牌
+function shuffleArray(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]] = [arr[j],arr[i]];
+  }
+}
+
+// 初始渲染
+render();
+</script>
+</body>
+</html>
